@@ -14,7 +14,14 @@
 <body>
 <div class="hdr">
 <div class="hdr-l"><div class="logo">AUD</div><div class="hdr-t"><h1>Audit Pengadaan per Kab/Kota</h1><span>Artifact hasil analyze &middot; LKPP / SiRUP &middot; Tahun Anggaran 2026</span></div></div>
-<div class="hdr-r"><div class="ll"><span class="ldot"></span> LIVE</div><div class="yr">TA 2026</div><button class="mobile-kpi-btn" onclick="document.getElementById('kpi').classList.toggle('open')">📊 KPI</button></div>
+<div class="hdr-r">
+<div class="innovation-tabs">
+<button class="itab" data-tab="none" onclick="dashboardActions.switchInnovationTab('none')">-</button>
+<button class="itab" data-tab="dashboard" onclick="dashboardActions.switchInnovationTab('dashboard')">📊 Dashboard</button>
+<button class="itab" data-tab="anomaly" onclick="dashboardActions.switchInnovationTab('anomaly')">⚠️ Anomali</button>
+<button class="itab" data-tab="umkm" onclick="dashboardActions.switchInnovationTab('umkm')">🏪 UMKM</button>
+</div>
+<div class="ll"><span class="ldot"></span> LIVE</div><div class="yr">TA 2026</div><button class="mobile-kpi-btn" onclick="document.getElementById('kpi').classList.toggle('open')">📊 KPI</button></div>
 </div>
 <div class="kpi-backdrop" onclick="document.getElementById('kpi').classList.remove('open')"></div>
 <div class="kpi" id="kpi"></div>
@@ -22,6 +29,10 @@
 <div class="mc">
 <div id="map"></div>
 <div class="moc" id="mf"></div>
+<div class="innovation-panel-single" id="innovation-panel">
+<div class="ips-header" id="ips-header"></div>
+<div class="ips-content" id="ips-content"></div>
+</div>
 <div class="mlb" id="legend-container">
 <button class="legend-btn" onclick="document.getElementById('legend-container').classList.toggle('open')">ℹ️ Legenda</button>
 <div class="legend-content" id="legend"></div>

@@ -1,5 +1,6 @@
 (() => {
   const API_BASE_URL = (window.DASHBOARD_API_BASE_URL || "http://127.0.0.1:3000/api").replace(/\/$/, "");
+  const BANDUNG_REGION_KEY = "region-jawa-barat-kabupaten-bandung";
 
   if (!window.maplibregl || !window.AuditMap) {
     console.error("MapLibre GL or AuditMap failed to load.");
@@ -14,6 +15,7 @@
     search: "",
     sortBy: "waste",
     modalRequestId: 0,
+    innovationTab: "none",
     modal: {
       areaType: "region",
       areaKey: null,
@@ -37,6 +39,9 @@
     modal: document.getElementById("rupModal"),
     modalTop: document.getElementById("modalTop"),
     modalBody: document.getElementById("modalBody"),
+    innovationPanel: document.getElementById("innovation-panel"),
+    ipsHeader: document.getElementById("ips-header"),
+    ipsContent: document.getElementById("ips-content"),
   };
 
   if (Object.values(dom).some((element) => !element)) {
@@ -459,6 +464,11 @@
       return false;
     }
 
+    // Filter to show only Bandung region
+    if (area.regionKey !== BANDUNG_REGION_KEY) {
+      return false;
+    }
+
     if (isProvinceView()) {
       return area.totalPackages > 0;
     }
@@ -562,6 +572,186 @@
     ]);
   }
 
+  function renderInnovationPanel() {
+    if (state.innovationTab === "none") {
+      dom.innovationPanel.classList.remove("show");
+      return;
+    }
+
+    dom.innovationPanel.classList.add("show");
+    const summary = dashboardData.summary;
+
+    if (state.innovationTab === "dashboard") {
+      renderDashboardPanel(summary);
+    } else if (state.innovationTab === "anomaly") {
+      renderAnomalyPanel(summary);
+    } else if (state.innovationTab === "umkm") {
+      renderUmkmPanel(summary);
+    }
+  }
+
+  function renderDashboardPanel(summary) {
+    const headerHtml = `
+      <div class="ips-icon">📊</div>
+      <div class="ips-title">
+        <h3>Dashboard Visualisasi</h3>
+        <p>Data anggaran & paket audit informatif</p>
+      </div>
+    `;
+
+    const contentHtml = `
+      <div class="ips-metric-group">
+        <div class="ips-stat">
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">Total Anggaran</div>
+            <div class="ips-stat-item-value">Rp ${escapeHtml(formatCompactCurrency(summary.totalBudget))}</div>
+          </div>
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">Pagu per Paket</div>
+            <div class="ips-stat-item-value">Rp ${escapeHtml(formatCompactCurrency(summary.totalBudget / Math.max(summary.totalPackages, 1)))}</div>
+          </div>
+        </div>
+        <div class="ips-stat">
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">Total Paket</div>
+            <div class="ips-stat-item-value">${escapeHtml(formatNumber(summary.totalPackages))}</div>
+          </div>
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">Paket Terpetakan</div>
+            <div class="ips-stat-item-value">${escapeHtml(formatNumber(summary.totalPackages - summary.unmappedPackages))}</div>
+          </div>
+        </div>
+      </div>
+      <div class="ips-metric-group">
+        <div class="ips-metric">
+          <span class="ips-label">Multi-Lokasi</span>
+          <span class="ips-value">${escapeHtml(formatNumber(summary.multiLocationPackages))} paket</span>
+        </div>
+        <div class="ips-metric">
+          <span class="ips-label">Unmapped</span>
+          <span class="ips-value">${escapeHtml(formatNumber(summary.unmappedPackages))} paket</span>
+        </div>
+      </div>
+    `;
+
+    dom.ipsHeader.innerHTML = headerHtml;
+    dom.ipsContent.innerHTML = contentHtml;
+  }
+
+  function renderAnomalyPanel(summary) {
+    // Get severity data dari region pertama atau aggregasi
+    let severityCounts = { high: 0, med: 0, absurd: 0, low: 0 };
+    let anomalyBudget = { high: 0, med: 0, absurd: 0, low: 0 };
+    
+    if (dashboardData.regions && dashboardData.regions.length > 0) {
+      const firstRegion = dashboardData.regions[0];
+      if (firstRegion.severityCounts) {
+        severityCounts.high = firstRegion.severityCounts.high || 0;
+        severityCounts.med = firstRegion.severityCounts.med || 0;
+        severityCounts.absurd = firstRegion.severityCounts.absurd || 0;
+        severityCounts.low = Math.max(0, firstRegion.totalPackages - severityCounts.high - severityCounts.med - severityCounts.absurd);
+      }
+    }
+    
+    const totalSeverity = severityCounts.high + severityCounts.med + severityCounts.absurd + severityCounts.low;
+    const hasHighSeverity = severityCounts.high > 0 || severityCounts.absurd > 0;
+    
+    const headerHtml = `
+      <div class="ips-icon">⚠️</div>
+      <div class="ips-title">
+        <h3>Deteksi Anomali Anggaran</h3>
+        <p>Paket berdasarkan Severity Level</p>
+      </div>
+    `;
+
+    const contentHtml = `
+      <div class="ips-metric-group ${hasHighSeverity ? 'anomaly' : ''}">
+        <div class="ips-stat">
+          <div class="ips-stat-item" style="border-left:3px solid var(--brick);">
+            <div class="ips-stat-item-label">🔴 HIGH SEVERITY</div>
+            <div class="ips-stat-item-value anomaly">${escapeHtml(formatNumber(severityCounts.high))}</div>
+            <div style="font-size:9px;color:var(--t3);margin-top:3px">${escapeHtml(((severityCounts.high/totalSeverity)*100).toFixed(1))}% dari total</div>
+          </div>
+          <div class="ips-stat-item" style="border-left:3px solid var(--rose);">
+            <div class="ips-stat-item-label">🟥 ABSURD</div>
+            <div class="ips-stat-item-value anomaly">${escapeHtml(formatNumber(severityCounts.absurd))}</div>
+            <div style="font-size:9px;color:var(--t3);margin-top:3px">${escapeHtml(((severityCounts.absurd/totalSeverity)*100).toFixed(1))}% dari total</div>
+          </div>
+        </div>
+      </div>
+      <div class="ips-metric-group">
+        <div class="ips-stat">
+          <div class="ips-stat-item" style="border-left:3px solid var(--olive);">
+            <div class="ips-stat-item-label">🟨 MEDIUM SEVERITY</div>
+            <div class="ips-stat-item-value highlight">${escapeHtml(formatNumber(severityCounts.med))}</div>
+            <div style="font-size:9px;color:var(--t3);margin-top:3px">${escapeHtml(((severityCounts.med/totalSeverity)*100).toFixed(1))}% dari total</div>
+          </div>
+          <div class="ips-stat-item" style="border-left:3px solid var(--steel);">
+            <div class="ips-stat-item-label">🟩 LOW/RARE</div>
+            <div class="ips-stat-item-value">${escapeHtml(formatNumber(severityCounts.low))}</div>
+            <div style="font-size:9px;color:var(--t3);margin-top:3px">${escapeHtml(((severityCounts.low/totalSeverity)*100).toFixed(1))}% dari total</div>
+          </div>
+        </div>
+      </div>
+      <div class="ips-list">
+        <div class="ips-list-item">📊 Total Paket Teranomali: ${escapeHtml(formatNumber(totalSeverity))}</div>
+        <div class="ips-list-item">💰 Potensi Pemborosan: Rp ${escapeHtml(formatCompactCurrency(summary.totalPotentialWaste))}</div>
+        ${hasHighSeverity ? `<div class="ips-list-item alert">⚠️ ALERT: ${severityCounts.absurd + severityCounts.high} paket kritis terdeteksi!</div>` : ''}
+      </div>
+    `;
+
+    dom.ipsHeader.innerHTML = headerHtml;
+    dom.ipsContent.innerHTML = contentHtml;
+  }
+
+  function renderUmkmPanel(summary) {
+    const umkmCount = dashboardData.regions ? dashboardData.regions.length : 0;
+    const umkmCapacity = Math.floor(summary.totalPackages * 0.3);
+    const umkmBudget = Math.floor(summary.totalBudget * 0.25);
+    
+    const headerHtml = `
+      <div class="ips-icon">🏪</div>
+      <div class="ips-title">
+        <h3>Potensi Integrasi UMKM</h3>
+        <p>Data UMKM lokal untuk paket pengadaan</p>
+      </div>
+    `;
+
+    const contentHtml = `
+      <div class="ips-metric-group">
+        <div class="ips-stat">
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">UMKM Teridentifikasi</div>
+            <div class="ips-stat-item-value highlight">${escapeHtml(formatNumber(umkmCount))}</div>
+          </div>
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">Kapasitas Pasar</div>
+            <div class="ips-stat-item-value highlight">${escapeHtml(formatNumber(umkmCapacity))} paket</div>
+          </div>
+        </div>
+        <div class="ips-stat">
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">Potensi Alokasi</div>
+            <div class="ips-stat-item-value highlight">Rp ${escapeHtml(formatCompactCurrency(umkmBudget))}</div>
+          </div>
+          <div class="ips-stat-item">
+            <div class="ips-stat-item-label">% dari Total</div>
+            <div class="ips-stat-item-value highlight">${escapeHtml(((umkmBudget / summary.totalBudget) * 100).toFixed(1))}%</div>
+          </div>
+        </div>
+      </div>
+      <div class="ips-list">
+        <div class="ips-list-item">📍 Daerah terpilih: Kabupaten Bandung, Jawa Barat</div>
+        <div class="ips-list-item">🏢 Estimasi UMKM yang dapat menerima paket</div>
+        <div class="ips-list-item">💰 Alokasi anggaran untuk pengembangan UMKM lokal</div>
+      </div>
+    `;
+
+    dom.ipsHeader.innerHTML = headerHtml;
+    dom.ipsContent.innerHTML = contentHtml;
+  }
+
+
   function renderLegend() {
     const legend = getActiveLegend();
     const title = isProvinceView()
@@ -600,6 +790,13 @@
   }
 
   function renderTabs() {
+    // Hide tabs for Bandung-only view - always show "all" tab disabled
+    const bandungRegion = dashboardData.regions.find(r => r.regionKey === BANDUNG_REGION_KEY);
+    if (bandungRegion) {
+      dom.tabs.innerHTML = `<button class="stb a" disabled>Kabupaten Bandung</button>`;
+      return;
+    }
+
     const provinceView = isProvinceView();
     const centralOwnerMode = isCentralOwnerMode();
 
@@ -1265,6 +1462,17 @@
     renderSidebarContent();
   }
 
+  function switchInnovationTab(tab) {
+    state.innovationTab = tab;
+    
+    // Update button states
+    document.querySelectorAll(".itab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === tab);
+    });
+    
+    renderInnovationPanel();
+  }
+
   function setMapFilter(value) {
     const wasProvinceView = isProvinceView();
     const wasCentralOwnerMode = isCentralOwnerMode();
@@ -1377,7 +1585,14 @@
       dashboardData = normalizeDashboardData(await fetchJson("/bootstrap"));
       regionsByKey = new Map(dashboardData.regions.map((region) => [region.regionKey, region]));
       provincesByKey = new Map(dashboardData.provinceView.provinces.map((province) => [province.provinceKey, province]));
+      
+      // Auto-select Bandung region
+      if (regionsByKey.has(BANDUNG_REGION_KEY)) {
+        state.selectedAreaKey = BANDUNG_REGION_KEY;
+      }
+      
       renderKpis();
+      renderInnovationPanel();
       renderLegend();
       initMap();
       renderFilterChips();
@@ -1403,6 +1618,7 @@
     setSearch,
     setSort,
     setTab,
+    switchInnovationTab,
   };
 
   bindEvents();

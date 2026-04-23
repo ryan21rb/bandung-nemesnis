@@ -3,6 +3,9 @@ const { DEFAULT_REGION_PAGE_SIZE, MAX_REGION_PAGE_SIZE } = require("./config");
 const LEGEND_COLORS = ["#7b86a3", "#b5a882", "#d4a999", "#8b7332", "#a83c2e"];
 const VALID_OWNER_TYPES = ["kabkota", "provinsi", "central", "other"];
 const VALID_SEVERITIES = ["low", "med", "high", "absurd"];
+
+// Filter to show only Kabupaten Bandung
+const BANDUNG_REGION_KEY = "region-jawa-barat-kabupaten-bandung";
 const OWNER_METRIC_DEFINITIONS = [
   {
     key: "central",
@@ -254,8 +257,10 @@ function getNationalSummary(db) {
         COALESCE(SUM(CASE WHEN mapped_region_count = 0 THEN 1 ELSE 0 END), 0) AS unmapped_packages,
         COALESCE(SUM(CASE WHEN mapped_region_count > 1 THEN 1 ELSE 0 END), 0) AS multi_location_packages
       FROM packages
+      INNER JOIN package_regions ON packages.id = package_regions.package_id
+      WHERE package_regions.region_key = ?
     `)
-    .get();
+    .get(BANDUNG_REGION_KEY);
 }
 
 function getRegionRows(db) {
@@ -296,13 +301,14 @@ function getRegionRows(db) {
         region_metrics.absurd_severity_packages
       FROM regions
       INNER JOIN region_metrics ON region_metrics.region_key = regions.region_key
+      WHERE regions.region_key = ?
       ORDER BY
         region_metrics.total_potential_waste DESC,
         region_metrics.total_priority_packages DESC,
         region_metrics.total_packages DESC,
         regions.display_name ASC
     `)
-    .all();
+    .all(BANDUNG_REGION_KEY);
 }
 
 function getProvinceRows(db) {
@@ -334,29 +340,59 @@ function getProvinceRows(db) {
     .all();
 }
 
-function getOwnerRows(db, ownerType) {
+function getOwnerRows(db, ownerType, regionKey = null) {
+  if (!regionKey) {
+    // Return all owners if no region key specified
+    return db
+      .prepare(`
+        SELECT
+          owner_metrics.owner_type,
+          owner_metrics.owner_name,
+          owner_metrics.total_packages,
+          owner_metrics.total_priority_packages,
+          owner_metrics.total_flagged_packages,
+          owner_metrics.total_potential_waste,
+          owner_metrics.total_budget,
+          owner_metrics.med_severity_packages,
+          owner_metrics.high_severity_packages,
+          owner_metrics.absurd_severity_packages
+        FROM owner_metrics
+        WHERE owner_metrics.owner_type = ?
+        ORDER BY
+          owner_metrics.total_potential_waste DESC,
+          owner_metrics.total_priority_packages DESC,
+          owner_metrics.total_packages DESC,
+          owner_metrics.owner_name ASC
+      `)
+      .all(ownerType);
+  }
+
+  // Return owners filtered by region
   return db
     .prepare(`
       SELECT
-        owner_metrics.owner_type,
-        owner_metrics.owner_name,
-        owner_metrics.total_packages,
-        owner_metrics.total_priority_packages,
-        owner_metrics.total_flagged_packages,
-        owner_metrics.total_potential_waste,
-        owner_metrics.total_budget,
-        owner_metrics.med_severity_packages,
-        owner_metrics.high_severity_packages,
-        owner_metrics.absurd_severity_packages
-      FROM owner_metrics
-      WHERE owner_metrics.owner_type = ?
+        packages.owner_type,
+        packages.owner_name,
+        COUNT(*) AS total_packages,
+        COALESCE(SUM(packages.is_priority), 0) AS total_priority_packages,
+        COALESCE(SUM(packages.is_flagged), 0) AS total_flagged_packages,
+        COALESCE(ROUND(SUM(packages.potential_waste), 2), 0) AS total_potential_waste,
+        COALESCE(SUM(COALESCE(packages.budget, 0)), 0) AS total_budget,
+        COALESCE(SUM(CASE WHEN packages.severity = 'med' THEN 1 ELSE 0 END), 0) AS med_severity_packages,
+        COALESCE(SUM(CASE WHEN packages.severity = 'high' THEN 1 ELSE 0 END), 0) AS high_severity_packages,
+        COALESCE(SUM(CASE WHEN packages.severity = 'absurd' THEN 1 ELSE 0 END), 0) AS absurd_severity_packages
+      FROM packages
+      INNER JOIN package_regions ON packages.id = package_regions.package_id
+      WHERE packages.owner_type = ?
+        AND package_regions.region_key = ?
+      GROUP BY packages.owner_type, packages.owner_name
       ORDER BY
-        owner_metrics.total_potential_waste DESC,
-        owner_metrics.total_priority_packages DESC,
-        owner_metrics.total_packages DESC,
-        owner_metrics.owner_name ASC
+        total_potential_waste DESC,
+        total_priority_packages DESC,
+        total_packages DESC,
+        packages.owner_name ASC
     `)
-    .all(ownerType);
+    .all(ownerType, regionKey);
 }
 
 function normalizeScopedPackageQuery(requestQuery, options = {}) {
@@ -590,11 +626,38 @@ function queryOwnerPackagesPage(db, ownerType, ownerName, normalizedQuery) {
   };
 }
 
+function filterGeoJsonByRegionKeys(geoJson, regionKeys) {
+  if (!geoJson || !geoJson.features) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const regionKeySet = new Set(regionKeys);
+  const filtered = geoJson.features.filter((feature) => {
+    const regionKey = feature.properties?.regionKey;
+    return regionKey && regionKeySet.has(regionKey);
+  });
+
+  console.log(`[GeoJSON] Total: ${geoJson.features.length}, Filtered: ${filtered.length}, Target: ${regionKeys.join(", ")}`);
+
+  return {
+    type: "FeatureCollection",
+    features: filtered,
+  };
+}
+
 function getBootstrapPayload(db) {
   const summaryRow = getNationalSummary(db);
   const regions = getRegionRows(db).map(mapRegionRow);
   const provinces = getProvinceRows(db).map(mapProvinceRow);
-  const centralOwners = getOwnerRows(db, "central").map(mapOwnerRow);
+  // Get central owners filtered by Bandung region
+  const centralOwners = getOwnerRows(db, "central", BANDUNG_REGION_KEY).map(mapOwnerRow);
+
+  // Filter GeoJSON to only include Bandung region
+  const fullGeo = getJsonAsset(db, "audit_geojson", { type: "FeatureCollection", features: [] });
+  const filteredGeo = filterGeoJsonByRegionKeys(
+    fullGeo,
+    regions.map((r) => r.regionKey)
+  );
 
   return {
     summary: {
@@ -606,7 +669,7 @@ function getBootstrapPayload(db) {
       multiLocationPackages: summaryRow.multi_location_packages || 0,
     },
     legend: buildLegend(regions.map((region) => region.totalPotentialWaste)),
-    geo: getJsonAsset(db, "audit_geojson", { type: "FeatureCollection", features: [] }),
+    geo: filteredGeo,
     regions,
     provinceView: {
       legend: buildLegend(provinces.map((province) => province.totalPotentialWaste)),
