@@ -790,7 +790,7 @@
   }
 
   function renderTabs() {
-    // Hide tabs for Bandung-only view - always show "all" tab disabled
+    // Hide tabs for Bandung-only view - always show "all" tab disabledd
     const bandungRegion = dashboardData.regions.find(r => r.regionKey === BANDUNG_REGION_KEY);
     if (bandungRegion) {
       dom.tabs.innerHTML = `<button class="stb a" disabled>Kabupaten Bandung</button>`;
