@@ -1,5 +1,5 @@
 (() => {
-  const API_BASE_URL = (window.DASHBOARD_API_BASE_URL || "https://k46t2h-3000.csb.app").replace(/\/$/, "");
+  const API_BASE_URL = (window.DASHBOARD_API_BASE_URL || "https://k46t2h-3000.csb.app/api").replace(/\/$/, "");
   const BANDUNG_REGION_KEY = "region-jawa-barat-kabupaten-bandung";
 
   if (!window.maplibregl || !window.AuditMap) {
